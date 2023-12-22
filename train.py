@@ -96,7 +96,70 @@ class FeedForwardBlock(nn.Module):
         x = self.linear2(x) # shape: (batch_size) * seq_length * d_model
         return x
     
-
+class MultiHeadAttention(nn.Module):
+    # Input is copied into 3 matrices (Query, Key, Value) and then we apply attention to them
+    # Q* Wq = Q' then we split it into h different heads
+    # similar we do we K and V
+    # attention is calculated for each head by softmax(Q' * K' / sqrt(d_k)) * V
+    # d_k = d_model / h
+    # Then we concatenate the heads and multiply it by Wo
+    
+    def __init__(self, d_model: int, num_heads: int, dropout: float):
+        super().__init__()
+        self.d_model = d_model
+        # h has to be a factor of d_model
+        self.num_heads = num_heads
         
-
+        self.dropout = nn.Dropout(dropout)
         
+        assert d_model % num_heads == 0, "d_model should be multiple of h"
+        
+              
+        self.d_k = d_model // num_heads
+        
+        self.Wq = nn.Linear(d_model, d_model)
+        self.Wk = nn.Linear(d_model, d_model)
+        self.Wv = nn.Linear(d_model, d_model)
+        
+        self.dv = self.d_k
+        self.Wo = nn.Linear(self.num_heads * self.dv, self.d_model)
+    
+    @staticmethod
+    def calculate_attention(query, key, value, mask, dropout: nn.Dropout):
+        d_k = query.shape[-1] #getting the last dimension of the query matrix
+        
+        attention_scores = query.matmul(key.transpose(-2, -1)) / math.sqrt(d_k) # shape: batch_size * num_heads * seq_length * seq_length
+        # now applying mask to the attention scores
+        
+        if(mask) is not None:
+            attention_scores.masked_fill_(mask == 0, -1e9) # we are replacing the values of the mask with -1e9
+        
+        attention_scores = attention_scores.softmax(dim = -1)
+        if dropout is not None:
+            attention_scores = dropout(attention_scores)
+        
+        return attention_scores.matmul(value), attention_scores
+          
+    def forward(self, q,k,v,mask):
+        # We sometimes want to mask some of the values: i.e., dont want some words to interact with other words
+        # we do that by replacing attention scores of those words with very small value (i.e., -inf)
+        
+        query = self.Wq(q) # Batch_size * seq_length * d_model --> Batch_size * seq_length * d_model
+        key = self.Wk(k)
+        value = self.Wv(v)
+        
+        query= query.view(query.shape[0], query.shape[1], self.num_heads, self.d_k).transpose(1,2) # Batch_size * seq_length * d_model --> Bath_size * Seq_length * heads * d_k --> Batch_size * num_heads * seq_length * d_k
+        # We are reshaping the query matrix by adding new dimension i.e., heads and d_k
+        # we then swap the columns and numbver of heads dimentions
+        
+        value = value.view(value.shape[0], value.shape[1], self.num_heads, self.d_k).transpose(1,2)
+        key = key.view(key.shape[0], key.shape[1], self.num_heads, self.d_k).transpose(1,2)
+        
+        x, attension_scores = self.calculate_attention(query, key, value, mask, self.dropout)
+        
+        # Batch, h, seq_len, d_k --> batch, seq_len, h, d_k --> batch, seq_len, d_model
+        x = x.transpose(1,2).continguous()
+        # tell pytorch to concate
+        x = x.view(x.shape[0], -1, self.num_heads * self.d_k)
+        
+        return self.Wo(x), attension_scores
