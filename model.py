@@ -14,11 +14,11 @@ class InputEmbeddings(nn.Module):
         
 class PositionalEncoding(nn.Module):
     # We encode the position of each word within the sentence
-    def __init__(self, d_model: int, seq_length: int, droput : float):
+    def __init__(self, d_model: int, seq_length: int, dropout : float):
         super().__init__()
         self.d_model = d_model
         self.seq_length = seq_length
-        self.dropout = nn.Dropout(droput)  # to randomly 0 some elements of the input tensor by bernoulli distribution
+        self.dropout = nn.Dropout(dropout)  # to randomly 0 some elements of the input tensor by bernoulli distribution
         
         # Creating matrix which is seq_length * d_model
         pe = torch.zeros(seq_length, d_model)
@@ -93,7 +93,7 @@ class FeedForwardBlock(nn.Module):
         # x is of shape batch_size * seq_length * d_model
         x = self.linear1(x) # shape: (batch_size) * seq_length * dff
         x = nn.ReLU(x) # if x is negative, we will make it 0
-        x = self.dropout(x)
+        x = self.dropout(x[0])
         x = self.linear2(x) # shape: (batch_size) * seq_length * d_model
         return x
     
@@ -170,7 +170,7 @@ class MultiHeadAttention(nn.Module):
         
         return self.Wo(x), attension_scores
     
-class ResidualConnection(nn.Module):
+class ResidualConnectionOld(nn.Module):
     
     def __init__(self, d_model: int, dropout: float) -> None:
         super().__init__()
@@ -187,6 +187,16 @@ class ResidualConnection(nn.Module):
         
         return x + self.dropout(sublayer(self.norm(x)))
     
+class ResidualConnection(nn.Module):
+    
+        def __init__(self, features: int, dropout: float) -> None:
+            super().__init__()
+            self.dropout = nn.Dropout(dropout)
+            self.norm = LayerNormalization(features)
+    
+        def forward(self, x, sublayer):
+            return x + self.dropout(sublayer(self.norm(x)))
+
 class EncoderBlock(nn.Module):
     
     def __init__(self, d_model: int, self_attention_block: MultiHeadAttention, feed_forward_block: FeedForwardBlock, dropout: float) -> None:
