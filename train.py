@@ -163,3 +163,96 @@ class MultiHeadAttention(nn.Module):
         x = x.view(x.shape[0], -1, self.num_heads * self.d_k)
         
         return self.Wo(x), attension_scores
+    
+class ResidualConnection(nn.Module):
+    
+    def __init__(self, d_model: int, dropout: float) -> None:
+        super().__init__()
+        self.d_model = d_model
+        self.dropout = nn.Dropout(dropout)
+        self.norm = LayerNormalization()
+        
+    def forward(self,x, sublayer):
+        # x is of shape batch_size * seq_length * d_model
+        # sublayer is a function that is passed to the ResidualConnection
+        # sublayer is either MultiHeadAttention or FeedForwardBlock
+        # we are adding the output of the sublayer to the input of the ResidualConnection
+        # we are normalizing the output of the sublayer
+        
+        return x + self.dropout(sublayer(self.norm(x)))
+    
+class EncoderBlock(nn.Module):
+    
+    def __init__(self, self_attention_block: MultiHeadAttention, feed_forward_block: FeedForwardBlock, dropout: float) -> None:
+        super().__init__()
+        self.self_attention_block = self_attention_block
+        self.feed_forward_block = feed_forward_block
+        # self.residual_connection1 = ResidualConnection(self_attention_block.d_model, dropout)
+        # self.residual_connection2 = ResidualConnection(feed_forward_block.d_model, dropout)
+        # does the same thing though :/
+        self.residual_connection = nn.ModuleList(ResidualConnection(dropout) for _ in range(2))
+        
+    def forward(self, x, src_mask):
+        
+        x = self.residual_connection[0](x, lambda x: self.self_attention_block(x, x, x, src_mask)) # query, key value is x itself
+        x = self.residual_connection[1](x, lambda x: self.feed_forward_block) 
+        
+        # We have two skip connections here, which are then repeated N times in the encoder
+        return x
+
+class Encoder(nn.Module):
+    def __init__(self, layers: nn.Module):
+        super().__init__()
+        self.layers = layers
+        self.norm = LayerNormalization() # normalizing the features
+    
+    def forward(self, x, src_mask):
+        for layer in self.layers:
+            x = layer(x, src_mask)
+        return self.norm(x)
+
+        
+class DecoderBlock(nn.Module):
+    def __init__(self, self_attention_block: MultiHeadAttention, cross_attention_block: MultiHeadAttention, feed_forward_block: FeedForwardBlock, dropout: float):
+        super().__init__()
+        self.self_attention_block = self_attention_block
+        self.cross_attention_block = cross_attention_block
+        self.feed_forward_block = feed_forward_block
+        
+        self.residual_connection = nn.ModuleList(ResidualConnection(dropout) for _ in range(3))
+        
+    def forward(self, x, encoder_output, src_mask, tgt_mask):
+        # because we are doing translation task here; we have one which comes from encoder (source sentence) and one which comes from decoder
+        
+        x = self.residual_connection[0](x, lambda x: self.self_attention_block(x, x, x, tgt_mask))
+        x = self.residual_connection[1](x, lambda x: self.cross_attention_block(x, encoder_output, encoder_output, src_mask))
+        x = self.residual_connection[2](x, lambda x: self.feed_forward_block)
+        
+        return x
+
+class Decoder(nn.Module):
+    def __init__(self, layers: nn.Module):
+        super().__init__()
+        self.layers = layers
+        self.norm = LayerNormalization()
+    
+    def forward(self, x, encoder_output, src_mask, tgt_mask):
+        for layer in self.layers:
+            x = layer(x, encoder_output, src_mask, tgt_mask)
+        return self.norm(x)
+    # just like we did for encoder, doing it for N times
+    
+class ProjectionLayer(nn.Module):
+    # convert seq, d_model to seq, vocab_size
+    
+    def __init__(self, d_model: int, vocab_size: int):
+        super().__init__()
+        self.d_model = d_model
+        self.vocab_size = vocab_size
+        
+        self.project = nn.Linear(d_model, vocab_size)
+    
+    def forward(self, x):
+        # x is of shape batch_size * seq_length * d_model
+        return self.project(x)
+
