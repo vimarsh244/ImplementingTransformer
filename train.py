@@ -32,6 +32,7 @@ def get_or_build_tokenizer(config, ds, lang):
         trainer = WordLevelTrainer(
             # vocab_size=config['vocab_size'],
             special_tokens=["[UNK]", "[SOS]", "[EOS]", "[PAD]"],
+            # explanation > https://huggingface.co/docs/tokenizers/python/latest/api/reference.html#tokenizers.Trainers.WordLevelTrainer
             min_frequency=2
         )
         tokenizer.train_from_iterator(get_all_sentences(ds, lang), trainer=trainer)
